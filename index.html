@@ -159,7 +159,9 @@
             <label class="small fw-semibold mb-1" for="fSub">Personaliza tu subdominio</label>
             <div class="d-flex align-items-center gap-2 mb-1">
               <input class="neu-input" id="fSub" name="subdominio" placeholder="ejemplo" required minlength="3" maxlength="30" pattern="[a-z0-9]+(-[a-z0-9]+)*" autocomplete="off" inputmode="url" data-fs-field>
-              <span class="small fw-semibold text-nowrap">.empresagt.com</span>
+              <span class="small fw-semibold text-nowrap">.</span>
+              <select class="neu-input" id="fDominio" name="dominio" style="width:auto;padding:.4rem .8rem">
+              </select>
             </div>
             <div class="small opacity-75 mb-3">Tu web quedará en: <b id="subVista">ejemplo.empresagt.com</b><br>Solo letras minúsculas, números y guiones (3 a 30 caracteres).</div>
             <label class="small fw-semibold mb-1" for="fNegocio">Nombre de tu negocio o proyecto</label>
