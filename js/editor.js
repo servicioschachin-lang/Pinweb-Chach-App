@@ -12,10 +12,13 @@ export class Editor {
     this.onChange = null;
     this.modalSocial = null;
     this.toolbar = null;
-    this.imageEditor = new ImageEditor(() => {
-      $('#edEstado').textContent = 'Cambios sin guardar';
-      if (this.onChange) this.onChange();
-    });
+    this.imageEditor = new ImageEditor(
+      () => {
+        $('#edEstado').textContent = 'Cambios sin guardar';
+        if (this.onChange) this.onChange();
+      },
+      () => this.schedulePush()
+    );
     this.history = [];
     this.historyIndex = -1;
     this.historyTimer = null;
@@ -48,6 +51,7 @@ export class Editor {
   open() {
     $('#galeria').style.display = 'none';
     $('#editor').style.display = 'block';
+    $('#editor').classList.add('editor-full');
     $('#edTitulo').textContent = this.estado.nombre;
     $('#edEstado').textContent = '';
     $('#frame').srcdoc = addBaseTag(this.estado.html, this.estado.base);
@@ -58,6 +62,7 @@ export class Editor {
 
   close() {
     $('#editor').style.display = 'none';
+    $('#editor').classList.remove('editor-full');
     $('#galeria').style.display = 'block';
     window.scrollTo({ top: 0 });
   }
@@ -97,10 +102,11 @@ export class Editor {
       [data-cw-bg-img]{cursor:pointer}
       [data-cw-bg-img]:hover{outline:3px solid #4f6df5;outline-offset:2px}
       .cw-toolbar{position:absolute;z-index:9999;display:flex;gap:6px;padding:6px;background:rgba(255,255,255,.95);border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.25);align-items:center}
-      .cw-toolbar-btn{border:0;background:transparent;cursor:pointer;font-size:1.1rem;padding:4px 6px;border-radius:8px}
+      .cw-toolbar-btn{border:0;background:transparent;cursor:pointer;font-size:1.1rem;padding:4px 6px;border-radius:8px;color:#1a1a1a}
       .cw-toolbar-btn:hover{background:rgba(79,109,245,.15)}
-      .cw-color-pop{display:none;gap:8px;align-items:center;margin-left:6px}
-      .cw-color-pop label{font-size:.75rem;font-weight:600}
+      .cw-toolbar-btn svg{stroke:#1a1a1a}
+      .cw-color-pop{display:none;gap:8px;align-items:center;margin-left:6px;color:#1a1a1a}
+      .cw-color-pop label{font-size:.75rem;font-weight:600;color:#1a1a1a}
       .cw-color-pop input[type="color"]{width:36px;height:28px;border:0;padding:0;cursor:pointer}
     `;
     doc.head.appendChild(st);
@@ -108,17 +114,24 @@ export class Editor {
 
   makeEditable(doc) {
     const SKIP = /^(SCRIPT|STYLE|NOSCRIPT|SELECT|OPTION|TEXTAREA|INPUT|SVG|IFRAME|CODE|PRE|HTML|HEAD|TITLE)$/;
+    const images = doc.body.querySelectorAll('img');
+    console.log('Imágenes encontradas:', images.length);
     doc.body.querySelectorAll('*').forEach(el => {
       if (SKIP.test(el.tagName.toUpperCase()) || el.closest('svg,script,style,noscript')) return;
       if (el.tagName === 'IMG') {
         el.setAttribute('data-cw-img', '1');
+        console.log('Imagen marcada:', el);
         return;
       }
       // Detectar elementos con background-image (fondos CSS)
-      const computed = window.getComputedStyle(el);
+      const computed = doc.defaultView.getComputedStyle(el);
       const bgImage = computed.backgroundImage;
-      if (bgImage && bgImage !== 'none' && !bgImage.includes('gradient')) {
+      const inlineBg = el.style.backgroundImage;
+      const hasBgImage = (bgImage && bgImage !== 'none' && !bgImage.includes('gradient')) ||
+                        (inlineBg && inlineBg !== 'none' && !inlineBg.includes('gradient'));
+      if (hasBgImage) {
         el.setAttribute('data-cw-bg-img', '1');
+        console.log('Fondo CSS marcado:', el, bgImage);
         return;
       }
       const propio = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim().length > 0);
@@ -151,8 +164,15 @@ export class Editor {
       if (e.target.closest('a,button,[role=button]')) e.preventDefault();
       // Seleccionar elemento con clic normal (para poder borrar, cambiar color, etc.)
       const el = e.target.closest('*');
-      if (el && !el.closest('img') && !el.closest('[data-cw-bg-img]') && !el.closest('input,textarea,select')) {
+      // Si se hizo clic directamente en una imagen marcada, no subir al padre
+      if (el && el.tagName === 'IMG' && el.hasAttribute('data-cw-img')) {
         this.selectElement(el);
+      } else if (el && !el.closest('img') && !el.closest('[data-cw-bg-img]') && !el.closest('input,textarea,select')) {
+        // Evitar seleccionar contenedores que tengan texto editable directo como objetivo principal
+        // (dejar que el clic en el texto lo edite, no que seleccione el contenedor para borrarlo)
+        if (!el.hasAttribute('data-cw-edit') && !el.closest('[data-cw-edit]') === el) {
+          this.selectElement(el);
+        }
       }
       // Si se mantiene Shift, también procesar selección (mismo comportamiento)
       if (e.shiftKey) {
@@ -205,6 +225,7 @@ export class Editor {
           img.removeAttribute('sizes');
           img.src = data;
           $('#edEstado').textContent = 'Cambios sin guardar';
+          this.schedulePush();
           if (this.onChange) this.onChange();
         };
         im.src = rd.result;
@@ -233,8 +254,13 @@ export class Editor {
           c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
           const data = f.type === 'image/png' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', .85);
           el.style.backgroundImage = `url(${data})`;
+          // Asegurar que el fondo se ajuste correctamente al contenedor
+          if (!el.style.backgroundSize) el.style.backgroundSize = 'cover';
+          if (!el.style.backgroundPosition) el.style.backgroundPosition = 'center';
+          if (!el.style.backgroundRepeat) el.style.backgroundRepeat = 'no-repeat';
           el.setAttribute('data-cw-bg-img', '1');
           $('#edEstado').textContent = 'Cambios sin guardar';
+          this.schedulePush();
           if (this.onChange) this.onChange();
         };
         im.src = rd.result;
@@ -267,7 +293,16 @@ export class Editor {
         if (this.onChange) this.onChange();
       },
       onDelete: (target) => {
-        if (target && target.parentNode) target.parentNode.removeChild(target);
+        if (!target || !target.parentNode) return;
+        // Protección: no borrar contenedores que tengan texto editable dentro
+        const tieneTextoEditable = target.querySelector('[data-cw-edit]') !== null;
+        const esContenedorHero = target.classList && target.classList.contains('hero');
+        if (tieneTextoEditable || esContenedorHero) {
+          if (!confirm('Este elemento contiene texto u otros contenidos. ¿Estás seguro de que quieres borrarlo todo?')) {
+            return;
+          }
+        }
+        target.parentNode.removeChild(target);
         this.elementoSeleccionado = null;
         if (this.toolbar) this.toolbar.hide();
         $('#edEstado').textContent = 'Cambios sin guardar';
@@ -285,12 +320,15 @@ export class Editor {
         const img = doc.createElement('img');
         img.alt = '';
         img.style.maxWidth = '100%';
-        if (target.parentNode) target.parentNode.replaceChild(img, target);
+        img.setAttribute('data-cw-img', '1');
+        // Insertar la imagen al inicio del elemento sin borrar el contenido
+        target.insertBefore(img, target.firstChild);
         this.elementoSeleccionado = null;
         if (this.toolbar) this.toolbar.hide();
         this.selectElement(img);
         this.imageEditor.replace(img);
         $('#edEstado').textContent = 'Cambios sin guardar';
+        this.schedulePush();
         if (this.onChange) this.onChange();
       }
     });
@@ -588,6 +626,8 @@ export class Editor {
     this.estado.html = this.history[this.historyIndex];
     $('#frame').srcdoc = addBaseTag(this.estado.html, this.estado.base);
     $('#edEstado').textContent = 'Cambios restaurados';
+    // Esperar a que el iframe cargue antes de preparar la edición
+    $('#frame').addEventListener('load', () => this.prepareEditing(), { once: true });
   }
 
   getHTML() {
@@ -638,6 +678,7 @@ export class Editor {
     this.estado = null;
     $('#frame').srcdoc = '';
     $('#editor').style.display = 'none';
+    $('#editor').classList.remove('editor-full');
     $('#galeria').style.display = 'block';
     ['btnCambiar', 'btnGuardar', 'btnPublicar'].forEach(id => $('#' + id).disabled = true);
     window.scrollTo({ top: 0 });
